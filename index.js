@@ -172,4 +172,50 @@ plugin.manifest = (path_, options) => {
 	});
 };
 
+plugin.manifestAsync = (pth, opts) => {
+	if (typeof pth === 'string') {
+		pth = {path: pth};
+	}
+
+	opts = Object.assign({
+		path: 'rev-manifest.json',
+		transformer: JSON
+	}, opts, pth);
+
+    const manifestPromise = getManifestFile(opts);
+
+	return through.obj(function(file, enc, cb) {
+		// Ignore all non-rev'd files
+		if (!file.path || !file.revOrigPath) {
+			cb();
+			return;
+		}
+
+        let manifest = {};
+
+		const revisionedFile = relativePath(path.resolve(file.cwd, file.base), path.resolve(file.cwd, file.path));
+		const originalFile = path.join(path.dirname(revisionedFile), path.basename(file.revOrigPath)).replace(/\\/g, '/');
+
+		manifest[originalFile] = revisionedFile;
+
+		manifestPromise.then(manifestFile => {
+			if (!manifestFile.isNull()) {
+				let oldManifest = {};
+
+				try {
+					oldManifest = opts.transformer.parse(manifestFile.contents.toString());
+				} catch (_) {}
+
+				manifest = Object.assign(oldManifest, manifest);
+			}
+
+			manifestFile.contents = Buffer.from(opts.transformer.stringify(sortKeys(manifest), null, '  '));
+
+            this.push(manifestFile);
+
+		    cb();
+		}).catch(cb);
+	});
+};
+
 module.exports = plugin;
